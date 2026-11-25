@@ -1,0 +1,6 @@
+node_modules/
+www/native.js
+.firebase/
+/build/
+android/.kotlin/
+Claude outputs/

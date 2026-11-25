@@ -1,0 +1,62 @@
+rules_version = '2';
+// Kada Billing: every shop's data is readable only by its own active users.
+// Sales can make bills and lower stock; admins also manage items, purchases and add users
+// (who wait for the owner's approval); only the owner approves users and edits shop details.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function memberPath(sid) { return /databases/$(database)/documents/shops/$(sid)/members/$(request.auth.uid); }
+    function isMember(sid) { return signedIn() && exists(memberPath(sid)) && get(memberPath(sid)).data.status == 'active'; }
+    function roleIn(sid, roles) { return isMember(sid) && get(memberPath(sid)).data.role in roles; }
+    function isOwner(sid) { return roleIn(sid, ['owner']); }
+    function isManager(sid) { return roleIn(sid, ['owner', 'admin']); }
+    function onlyChanges(keys) { return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys); }
+
+    // username -> login account. Anyone can look up one name to log in; nobody can list them.
+    match /usernames/{name} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if signedIn() && (request.resource.data.uid == request.auth.uid || isManager(request.resource.data.sid));
+      allow update: if isOwner(resource.data.sid) && request.resource.data.sid == resource.data.sid;
+      allow delete: if isOwner(resource.data.sid);
+    }
+
+    match /shops/{sid} {
+      allow get: if isMember(sid);
+      allow list: if false;
+      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if isOwner(sid) && request.resource.data.ownerUid == resource.data.ownerUid;
+      allow delete: if false;
+
+      match /members/{uid} {
+        allow get: if signedIn() && (uid == request.auth.uid || isMember(sid));
+        allow list: if isMember(sid);
+        allow create: if signedIn() && (
+             (uid == request.auth.uid && request.resource.data.role == 'owner'
+                && get(/databases/$(database)/documents/shops/$(sid)).data.ownerUid == request.auth.uid)
+          || (isOwner(sid) && request.resource.data.role in ['admin', 'sales'])
+          || (isManager(sid) && request.resource.data.role in ['admin', 'sales'] && request.resource.data.status == 'pending'));
+        allow update: if (isOwner(sid) && uid != request.auth.uid && request.resource.data.role in ['admin', 'sales'])
+          || (signedIn() && uid == request.auth.uid && resource.data.status == 'active' && onlyChanges(['mustChange', 'name', 'phone']));
+        allow delete: if isOwner(sid) && uid != request.auth.uid;
+      }
+
+      match /items/{id} {
+        allow read: if isMember(sid);
+        allow create, delete: if isManager(sid);
+        allow update: if isManager(sid) || (isMember(sid) && onlyChanges(['stock']));
+      }
+      match /days/{id} {
+        allow read, create, update: if isMember(sid);
+        allow delete: if isManager(sid);
+      }
+      match /purchases/{id} {
+        allow read, write: if isManager(sid);
+      }
+      match /images/{id} {
+        allow read: if isMember(sid);
+        allow write: if isManager(sid);
+      }
+    }
+  }
+}

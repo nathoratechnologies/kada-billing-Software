@@ -1,0 +1,44 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx cap sync android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Build debug APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+      - run: cp android/app/build/outputs/apk/debug/app-debug.apk kada-billing.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kada-billing-apk
+          path: kada-billing.apk
+      - name: Publish as "test-build" release (phone download link)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete test-build -y --cleanup-tag || true
+          gh release create test-build kada-billing.apk --target "$GITHUB_SHA" \
+            --title "Kada Billing – test build" \
+            --notes "Install kada-billing.apk on an Android phone to test. Built from ${GITHUB_SHA::7}."
