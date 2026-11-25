@@ -1,4 +1,4 @@
-# Kada Billing
+# kada-billing-Software
 
 Billing for small shops: any shop registers itself, adds staff with roles, and bills from any phone or browser.
 
